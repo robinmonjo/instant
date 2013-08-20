@@ -10,7 +10,7 @@ import (
   "encoding/base64"
 )
  
-const BUF_LEN = 2048
+const BUF_LEN = 1024
 
 func StartServer() {
 	listener, err := net.Listen("tcp", "0.0.0.0:1337")
@@ -31,92 +31,88 @@ func StartServer() {
 }
  
 func handleConnection(conn net.Conn) {
-  fmt.Println("Incoming Connection, reading data")
-
   buffer := make([]byte, BUF_LEN)
-
   handShaked := false
-
+  
   for {
-    buffer = make([]byte, BUF_LEN)
-    _, err := conn.Read(buffer)
+    n, err := conn.Read(buffer)
+    
     if err != nil {
       fmt.Println("Error reading:", err.Error())
       return
     }
-    fmt.Println("received : ", buffer)
-    if !handShaked {
-      parts := strings.Split(string(buffer), "\n")
-      secret := ""
-      for _, element := range parts {
-        if strings.Contains(element, "Sec-WebSocket-Key") {
-          secret = strings.Split(element, ":")[1]
-          secret = strings.TrimSpace(secret)
-          break
-        }
-      }
-      fmt.Println("Secret is :", secret)
-      secretToHash := secret + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-      fmt.Println("Secret to hash is :", secretToHash)
-      h := sha1.New()
-      io.WriteString(h, secretToHash)
-      hashedSecret := h.Sum(nil)
-      fmt.Println("hashed secret is :", hashedSecret)
-      str := base64.StdEncoding.EncodeToString(hashedSecret)
 
-      response := "HTTP/1.1 101 Switching Protocols\r\n"
-      response += "Upgrade: websocket\r\n"
-      response += "Connection: Upgrade\r\n"
-      response += "Sec-WebSocket-Accept: " + str + "\r\n\r\n"
-      fmt.Println(response)
-      _, err = conn.Write([]byte(response))
+    data := buffer[0:n]
+
+    if !handShaked {
+      resp := handshakeResp(data)
+      _, err = conn.Write([]byte(resp))
       if err != nil {
         fmt.Println("Failed to write response")
+        return
       }
-      conn.Write([]byte("\n"))
       handShaked = true
     } else {
-      decode(buffer)
+      clearTxt := decode(data)
+      fmt.Println(clearTxt)
     }
 
+    //reset buffer
+    for i := 0; i < n; i++ {
+      buffer[i] = 0
+    }
   } 
   fmt.Println("Connection closed")
 }
 
-func decode (rawBytes []byte) string {
-  secondByte := rawBytes[1]
-
-  length := secondByte & 127 // may not be the actual length in the two special cases
-
-  indexFirstMask := 2          // if not a special case
-
-  if length == 126 {
-    indexFirstMask = 4
-  } else if length == 127 {
-    indexFirstMask = 10
+func handshakeResp (rawBytes []byte) string {
+  //1: find secret
+  parts := strings.Split(string(rawBytes), "\n")
+  secret := ""
+  for _, element := range parts {
+    if strings.Contains(element, "Sec-WebSocket-Key") {
+      secret = strings.Split(element, ":")[1]
+      secret = strings.TrimSpace(secret)
+      break
+    }
   }
 
-  masks := make([]byte, 4)
-  masks[0] = rawBytes[indexFirstMask]
-  masks[1] = rawBytes[indexFirstMask + 1]
-  masks[2] = rawBytes[indexFirstMask + 2]
-  masks[3] = rawBytes[indexFirstMask + 3]
- 
-  indexFirstDataByte := indexFirstMask + 4 // four bytes further
+  //2: add magick string + sha1 hash
+  secretToHash := secret + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+  cypher := sha1.New()
+  io.WriteString(cypher, secretToHash)
+  hashedSecret := cypher.Sum(nil)
 
-  // decoded = new array
+  //3: base64 encode
+  encoded := base64.StdEncoding.EncodeToString(hashedSecret)
 
-  // length := bytes.length - indexFirstDataByte // length of real data
-j := 0
-for i := indexFirstDataByte; i < len(rawBytes); i++ {
-    fmt.Println (string(rawBytes[i] | masks[j % 4]))
-    j++
+  //4: clean response string
+  response := "HTTP/1.1 101 Switching Protocols\r\n"
+  response += "Upgrade: websocket\r\n"
+  response += "Connection: Upgrade\r\n"
+  response += "Sec-WebSocket-Accept: " + encoded + "\r\n\r\n"
+  return response
 }
-return "hello"
 
-// keep going here : http://stackoverflow.com/questions/8125507/how-can-i-send-and-receive-websocket-messages-on-the-server-side
+//big thx: http://stackoverflow.com/questions/8125507/how-can-i-send-and-receive-websocket-messages-on-the-server-side
+func decode (rawBytes []byte) string {
+  var idxMask int
+  if rawBytes[1] == 126 {
+    idxMask = 4
+  } else if rawBytes[1] == 127 {
+    idxMask = 10
+  } else {
+    idxMask = 2
+  }
 
-// now use "decoded" to interpret the received data
+  masks := rawBytes[idxMask:idxMask + 4]
+  data := rawBytes[idxMask + 4:len(rawBytes)]
+  decoded := make([]byte, len(rawBytes) - idxMask + 4)
+
+  for i, b := range data {
+    decoded[i] = b ^ masks[i % 4]
+  }
+  return string(decoded)
 }
 
 
