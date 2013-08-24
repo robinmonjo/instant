@@ -4,10 +4,14 @@ import (
   "fmt"
 	"net/http"
 	"os"
-  "github.com/rmonjo/instant/lib"
+  "github.com/rmonjo/instant/web_sockets"
+  "github.com/rmonjo/instant/container"
 )
  
 func main() {
+
+  //first of all create the baseCN
+  container.CreateBaseCn()
 	
   http.HandleFunc("/", root)
 
@@ -19,7 +23,7 @@ func main() {
 		port = "9999"
 	}
 
-  go tcp_server.StartServer()
+  go web_sockets.StartServer()
 
 	fmt.Println("listening on port: ", port)
 	err := http.ListenAndServe(":" + port, nil)
