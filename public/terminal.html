@@ -30,10 +30,8 @@ $(document).ready(function() {
             console.log('Open');  
             jQuery(function($, undefined) {
         $('#terminal').terminal(function(command, term) {
-          if (command !== '') {
-              term.echo(String(command));
-              socket.send(String(command));
-          }
+          term.echo(String(command));
+          socket.send(String(command));
         }, {
           greetings: '',
           name: '',
