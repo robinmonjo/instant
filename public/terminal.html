@@ -42,6 +42,10 @@ $(document).ready(function() {
           prompt: '> '});
       });
           }  
+
+          socket.ondata = function(data){
+            console.log("got data " + data)
+          }
       
           socket.onmessage = function(msg){  
             console.log("got data : " + msg.data);
